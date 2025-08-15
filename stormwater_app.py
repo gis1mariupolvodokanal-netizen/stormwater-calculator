@@ -1,9 +1,8 @@
 import streamlit as st
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 
-# ===== Справочник коэффициентов шероховатости n =====
+# Справочник коэффициентов шероховатости n
 materials_n = {
     "Бетон": 0.013,
     "ПВХ": 0.009,
@@ -12,111 +11,148 @@ materials_n = {
     "Сталь": 0.012
 }
 
-# ===== Настройки страницы =====
 st.set_page_config(page_title="Калькулятор расхода ливневых стоков", layout="wide")
 st.title("💧 Калькулятор расхода ливневых стоков (формула Маннинга)")
 
-# ===== Ввод параметров =====
-col1, col2 = st.columns(2)
-with col1:
-    D = st.number_input("Диаметр трубы, м", value=0.1, step=0.01, format="%.3f")
-    h = st.number_input("Высота заполнения потоком, м", value=0.07, step=0.01, format="%.3f")
-    material = st.selectbox("Материал трубы", list(materials_n.keys()))
-with col2:
-    top1 = st.number_input("Отметка верха 1-го колодца, м", value=246.0, step=0.01)
-    depth1 = st.number_input("Глубина 1-го колодца, м", value=5.55, step=0.01)
-    top2 = st.number_input("Отметка верха 2-го колодца, м", value=245.0, step=0.01)
-    depth2 = st.number_input("Глубина 2-го колодца, м", value=5.57, step=0.01)
-    length = st.number_input("Расстояние между колодцами, м", value=73.2, step=0.1)
+# Выбор формы трубы
+pipe_shape = st.selectbox("Форма трубы", ["Круглая", "Прямоугольная"])
 
-# ===== Расчёт уклона =====
-invert1 = top1 - depth1
-invert2 = top2 - depth2
-S = (invert1 - invert2) / length  # безразмерный уклон
+# Ввод параметров сегментов трубы
+num_segments = st.number_input("Количество сегментов трубы", min_value=1, step=1, value=1)
 
-# ===== Функция для расчёта геометрии и расхода =====
-def manning_flow(D, h, n, S):
-    r = D / 2
-    theta = 2 * np.arccos(np.clip((r - h) / r, -1, 1))
-    A = (r**2 / 2) * (theta - np.sin(theta))
-    P = r * theta
+segments = []
+for i in range(num_segments):
+    st.subheader(f"Сегмент {i+1}")
+    col1, col2 = st.columns(2)
+    with col1:
+        if pipe_shape == "Круглая":
+            D = st.number_input(f"Диаметр трубы сегмента {i+1}, м", value=0.1, step=0.01, format="%.3f", key=f"D{i}")
+        else:
+            D = st.number_input(f"Ширина трубы сегмента {i+1}, м", value=0.1, step=0.01, format="%.3f", key=f"b{i}")
+            H = st.number_input(f"Высота трубы сегмента {i+1}, м", value=0.1, step=0.01, format="%.3f", key=f"H{i}")
+        h = st.number_input(f"Высота заполнения потоком сегмента {i+1}, м", value=0.07, step=0.01, format="%.3f", key=f"h{i}")
+        material = st.selectbox(f"Материал трубы сегмента {i+1}", list(materials_n.keys()), key=f"mat{i}")
+    with col2:
+        top1 = st.number_input(f"Высотная отметка верха 1-го колодца сегмента {i+1}, м", value=246.0, step=0.01, key=f"top1_{i}")
+        depth1 = st.number_input(f"Глубина 1-го колодца сегмента {i+1}, м", value=5.55, step=0.01, key=f"depth1_{i}")
+        top2 = st.number_input(f"Высотная отметка верха 2-го колодца сегмента {i+1}, м", value=245.0, step=0.01, key=f"top2_{i}")
+        depth2 = st.number_input(f"Глубина 2-го колодца сегмента {i+1}, м", value=5.57, step=0.01, key=f"depth2_{i}")
+        length = st.number_input(f"Длина сегмента {i+1}, м", value=73.2, step=0.1, key=f"length{i}")
+    
+    segments.append({
+        "D": D,
+        "H": H if pipe_shape == "Прямоугольная" else None,
+        "h": h,
+        "material": material,
+        "top1": top1,
+        "depth1": depth1,
+        "top2": top2,
+        "depth2": depth2,
+        "length": length
+    })
+
+total_Q_ls = 0
+st.subheader("📊 Результаты расчёта для каждого сегмента")
+for idx, seg in enumerate(segments):
+    # Расчет уклона
+    invert1 = seg["top1"] - seg["depth1"]
+    invert2 = seg["top2"] - seg["depth2"]
+    S = (invert1 - invert2) / seg["length"]
+
+    n = materials_n[seg["material"]]
+
+    if pipe_shape == "Круглая":
+        r = seg["D"] / 2
+        theta = 2 * np.arccos((r - seg["h"]) / r)
+        A = (r**2 / 2) * (theta - np.sin(theta))
+        P = r * theta
+        fill_ratio = seg["h"] / seg["D"]
+    else:
+        b = seg["D"]
+        H = seg["H"]
+        y = seg["h"]
+        A = b * y
+        P = b + 2 * y
+        fill_ratio = seg["h"] / seg["H"]
+
     R = A / P
-    V = (1 / n) * (R ** (2/3)) * np.sqrt(S)
-    Q = A * V
-    return A, P, R, V, Q
+    V = (1 / n) * (R ** (2/3)) * (S ** 0.5)
+    Q_m3s = A * V
+    Q_ls = Q_m3s * 1000
+    total_Q_ls += Q_ls
 
-# ===== Расчёт для заданного уровня заполнения =====
-n = materials_n[material]
-A, P, R, V, Q_m3s = manning_flow(D, h, n, S)
-Q_ls = Q_m3s * 1000  # л/с
+    st.write(f"**Сегмент {idx+1}**")
+    st.write(f"Уклон S: `{S:.5f}` ({S*100:.3f} %)")
+    st.write(f"Площадь A: `{A:.6f}` м²")
+    st.write(f"Смоченный периметр P: `{P:.4f}` м")
+    st.write(f"Гидравлический радиус R: `{R:.4f}` м")
+    st.write(f"Скорость V: `{V:.3f}` м/с")
+    st.write(f"Расход Q: `{Q_m3s:.5f}` м³/с  = `{Q_ls:.3f}` л/с")
 
-st.subheader("📊 Результаты расчёта для заданного уровня заполнения")
-st.write(f"Уклон S: `{S:.5f}` ({S*100:.3f} %)")
-st.write(f"Площадь A: `{A:.6f}` м²")
-st.write(f"Смоченный периметр P: `{P:.4f}` м")
-st.write(f"Гидравлический радиус R: `{R:.4f}` м")
-st.write(f"Скорость V: `{V:.3f}` м/с")
-st.write(f"**Расход Q: `{Q_m3s:.5f}` м³/с  = `{Q_ls:.3f}` л/с**")
+st.subheader("💡 Суммарный расход всей линии")
+st.write(f"**Qsum = {total_Q_ls:.3f} л/с**")
 
-# ===== Таблица Q для разных h/D =====
-ratios = np.linspace(0.05, 1.0, 200)
-table_data = []
-for ratio in ratios:
-    hh = ratio * D
-    A_i, P_i, R_i, V_i, Q_i = manning_flow(D, hh, n, S)
-    table_data.append([ratio, hh, A_i, P_i, R_i, V_i, Q_i, Q_i*1000])
-
-df = pd.DataFrame(table_data, columns=["h/D", "h (м)", "A (м²)", "P (м)", "R (м)", "V (м/с)", "Q (м³/с)", "Q (л/с)"])
-
-# ===== Определение максимального расхода =====
-max_row = df.loc[df["Q (м³/с)"].idxmax()]
-max_ratio = max_row["h/D"]
-max_Q_ls = max_row["Q (л/с)"]
-
-st.subheader("⭐ Оптимальное заполнение для максимального расхода")
-st.write(f"Максимальный расход достигается при `h/D ≈ {max_ratio:.2f}`")
-st.write(f"**Qmax = {max_Q_ls:.3f} л/с**")
-
-# ===== Интерактивный график зависимости Q от h/D с отметкой максимума =====
+# ===== График расхода по сегментам =====
 fig1, ax1 = plt.subplots(figsize=(6, 4))
-ax1.plot(df["h/D"], df["Q (л/с)"], color="blue", label="Q(h)")
-ax1.scatter(max_ratio, max_Q_ls, color="red", zorder=5, label="Максимальный расход")
-ax1.annotate(f"Qmax={max_Q_ls:.1f} л/с\nh/D={max_ratio:.2f}", 
-             xy=(max_ratio, max_Q_ls), xytext=(max_ratio+0.05, max_Q_ls),
-             arrowprops=dict(facecolor='red', shrink=0.05), fontsize=9)
-ax1.set_xlabel("h/D")
-ax1.set_ylabel("Q, л/с")
-ax1.set_title("Расход Q в зависимости от h/D")
-ax1.grid(True, linestyle='--', alpha=0.7)
-ax1.legend()
+Q_values = []
+for seg in segments:
+    invert1 = seg["top1"] - seg["depth1"]
+    invert2 = seg["top2"] - seg["depth2"]
+    S = (invert1 - invert2) / seg["length"]
+    n = materials_n[seg["material"]]
+    if pipe_shape == "Круглая":
+        r = seg["D"] / 2
+        theta = 2 * np.arccos((r - seg["h"]) / r)
+        A = (r**2 / 2) * (theta - np.sin(theta))
+        P = r * theta
+    else:
+        b = seg["D"]
+        H = seg["H"]
+        y = seg["h"]
+        A = b * y
+        P = b + 2 * y
+    R = A / P
+    V = (1 / n) * (R ** (2/3)) * (S ** 0.5)
+    Q_values.append(A * V)
+ax1.bar([f"Сегмент {i+1}" for i in range(len(segments))], Q_values, color="skyblue")
+ax1.set_ylabel("Q, м³/с")
+ax1.set_title("Расход Q по сегментам")
 st.pyplot(fig1)
 
-# ===== Чертёж поперечного сечения трубы =====
-fig2, ax2 = plt.subplots(figsize=(5, 5))
-r = D / 2
-circle = plt.Circle((0, 0), r, color="lightgray", zorder=1)
-ax2.add_patch(circle)
+# ===== График зависимости Q от степени заполнения =====
+st.subheader("📈 Зависимость Q от степени заполнения трубы")
+fig2, ax2 = plt.subplots(figsize=(6, 4))
+for idx, seg in enumerate(segments):
+    n = materials_n[seg["material"]]
+    invert1 = seg["top1"] - seg["depth1"]
+    invert2 = seg["top2"] - seg["depth2"]
+    S = (invert1 - invert2) / seg["length"]
 
-x = np.linspace(-r, r, 500)
-y_circle = np.sqrt(r**2 - x**2)
-y_water = np.clip(y_circle, -r, h - r)
-ax2.fill_between(x, -r, y_water, color="blue", alpha=0.5)
-
-# Подписи
-ax2.annotate("D", xy=(0, r + 0.01), ha="center", fontsize=10)
-ax2.annotate("h", xy=(r + 0.01, -r + h/2), fontsize=10)
-
-ax2.set_aspect("equal", adjustable="datalim")
-ax2.set_xlim(-r - 0.05, r + 0.05)
-ax2.set_ylim(-r - 0.05, r + 0.05)
-ax2.axis("off")
-ax2.set_title("Поперечное сечение трубы", fontsize=12)
+    fill_ratios = np.linspace(0.01, 1.0, 50)
+    Q_curve = []
+    if pipe_shape == "Круглая":
+        r = seg["D"] / 2
+        for fr in fill_ratios:
+            h = fr * seg["D"]
+            theta = 2 * np.arccos((r - h) / r)
+            A = (r**2 / 2) * (theta - np.sin(theta))
+            P = r * theta
+            R = A / P
+            V = (1 / n) * (R ** (2/3)) * (S ** 0.5)
+            Q_curve.append(A * V)
+    else:
+        b = seg["D"]
+        H = seg["H"]
+        for fr in fill_ratios:
+            h = fr * H
+            A = b * h
+            P = b + 2 * h
+            R = A / P
+            V = (1 / n) * (R ** (2/3)) * (S ** 0.5)
+            Q_curve.append(A * V)
+    ax2.plot(fill_ratios, Q_curve, label=f"Сегмент {idx+1}")
+ax2.set_xlabel("Степень заполнения (h/D или h/H)")
+ax2.set_ylabel("Q, м³/с")
+ax2.set_title("Зависимость Q от заполнения трубы")
+ax2.legend()
 st.pyplot(fig2)
-
-# ===== Таблица для отображения и скачивания =====
-st.subheader("📋 Таблица расхода при разном заполнении")
-st.dataframe(df.style.format({"h/D": "{:.2f}", "h (м)": "{:.3f}", "A (м²)": "{:.6f}", "P (м)": "{:.4f}",
-                              "R (м)": "{:.4f}", "V (м/с)": "{:.3f}", "Q (м³/с)": "{:.5f}", "Q (л/с)": "{:.3f}"}))
-
-csv = df.to_csv(index=False).encode("utf-8")
-st.download_button("💾 Скачать таблицу в CSV", csv, "Q_table.csv", "text/csv")
