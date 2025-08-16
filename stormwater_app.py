@@ -1,93 +1,159 @@
 import streamlit as st
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
-# Функция для гидравлического радиуса и площади
-def hydraulic_params(shape, D, h):
-    if shape == "Круглая":
-        r = D / 2
-        theta = 2 * np.arccos((r - h) / r)
-        area = (r**2 / 2) * (theta - np.sin(theta))
-        wetted_perimeter = r * theta
-    else:  # Прямоугольная
-        b = D
-        area = b * h
-        wetted_perimeter = b + 2 * h
-    R = area / wetted_perimeter if wetted_perimeter > 0 else 0
-    return area, R
+# --- Справочник коэффициентов шероховатости ---
+materials_n = {
+    "Бетон": 0.013,
+    "ПВХ": 0.009,
+    "Чугун": 0.014,
+    "Асбестоцемент": 0.011,
+    "Сталь": 0.012
+}
 
-# Расчет расхода
-def manning_flow(shape, D, h, S, n=0.013):
-    area, R = hydraulic_params(shape, D, h)
-    Q = (1 / n) * area * (R**(2/3)) * np.sqrt(S)
-    return Q
+st.set_page_config(page_title="Калькулятор ливневых стоков", layout="wide")
+st.title("💧 Калькулятор расхода ливневых стоков (Маннинг)")
 
-st.title("💧 Гидравлический расчет трубопровода")
+# --- Функции ---
+def hydraulic_params_circular(D, h):
+    r = D / 2
+    theta = 2 * np.arccos((r - h) / r)
+    A = (r**2 / 2) * (theta - np.sin(theta))  # площадь
+    P = r * theta  # смоченный периметр
+    return A, P
 
-# Ввод количества сегментов
-num_segments = st.number_input("Количество сегментов", min_value=1, max_value=10, value=2)
+def hydraulic_params_rectangular(b, h):
+    A = b * h
+    P = b + 2*h
+    return A, P
+
+def manning_flow(A, P, S, n):
+    R = A / P
+    V = (1 / n) * (R ** (2/3)) * (S ** 0.5)
+    Q = A * V
+    return R, V, Q
+
+# --- Ввод общих параметров ---
+shape = st.selectbox("Форма трубы", ["Круглая", "Прямоугольная"])
+material = st.selectbox("Материал трубы", list(materials_n.keys()))
+n = materials_n[material]
+
+num_segments = st.number_input("Количество сегментов трубы", min_value=1, max_value=10, value=1, step=1)
 
 segments = []
 for i in range(num_segments):
-    st.subheader(f"Сегмент {i+1}")
-    shape = st.selectbox(f"Форма трубы (Сегмент {i+1})", ["Круглая", "Прямоугольная"], key=f"shape_{i}")
-    D = st.number_input(f"Диаметр/ширина трубы, м (Сегмент {i+1})", min_value=0.1, value=0.5, step=0.1, key=f"D_{i}")
-    h = st.number_input(f"Высота воды, м (Сегмент {i+1})", min_value=0.01, value=D/2, step=0.05, key=f"h_{i}")
-    z1 = st.number_input(f"Высотная отметка 1-го колодца, м (Сегмент {i+1})", value=100.0, step=0.5, key=f"z1_{i}")
-    z2 = st.number_input(f"Высотная отметка 2-го колодца, м (Сегмент {i+1})", value=99.0, step=0.5, key=f"z2_{i}")
-    L = st.number_input(f"Длина трубы, м (Сегмент {i+1})", min_value=1.0, value=50.0, step=1.0, key=f"L_{i}")
-    S = max((z1 - z2) / L, 1e-6)  # уклон
-    Q = manning_flow(shape, D, h, S)
-    segments.append({"shape": shape, "D": D, "h": h, "Q": Q, "S": S})
+    st.markdown(f"### Сегмент {i+1}")
+    col1, col2 = st.columns(2)
+    with col1:
+        if shape == "Круглая":
+            D = st.number_input(f"Диаметр сегмента {i+1}, м", value=0.1, step=0.01, format="%.3f", key=f"D{i}")
+            h = st.number_input(f"Высота заполнения h сегмента {i+1}, м", value=0.07, step=0.01, format="%.3f", key=f"h{i}")
+            geom = (D, h)
+        else:
+            b = st.number_input(f"Ширина сегмента {i+1}, м", value=0.2, step=0.01, format="%.3f", key=f"b{i}")
+            h = st.number_input(f"Высота заполнения h сегмента {i+1}, м", value=0.15, step=0.01, format="%.3f", key=f"h{i}")
+            geom = (b, h)
+    with col2:
+        top1 = st.number_input(f"Высотная отметка верха 1-го колодца (сегмент {i+1}), м", value=246.0, step=0.01, key=f"top1_{i}")
+        depth1 = st.number_input(f"Глубина 1-го колодца (сегмент {i+1}), м", value=5.55, step=0.01, key=f"depth1_{i}")
+        top2 = st.number_input(f"Высотная отметка верха 2-го колодца (сегмент {i+1}), м", value=245.0, step=0.01, key=f"top2_{i}")
+        depth2 = st.number_input(f"Глубина 2-го колодца (сегмент {i+1}), м", value=5.57, step=0.01, key=f"depth2_{i}")
+        length = st.number_input(f"Длина сегмента {i+1}, м", value=73.2, step=0.1, key=f"length{i}")
+    segments.append((geom, h, top1, depth1, top2, depth2, length))
 
-# Вывод результатов
-st.header("📊 Результаты по сегментам")
+# --- Расчёт по сегментам ---
+results = []
+for idx, (geom, h, top1, depth1, top2, depth2, length) in enumerate(segments):
+    invert1 = top1 - depth1
+    invert2 = top2 - depth2
+    S = (invert1 - invert2) / length if length > 0 else 0.0001
 
-q_values = [seg["Q"] for seg in segments]
+    if shape == "Круглая":
+        D, h = geom
+        A, P = hydraulic_params_circular(D, h)
+    else:
+        b, h = geom
+        A, P = hydraulic_params_rectangular(b, h)
 
-cols = st.columns(num_segments)  # выводим поперечные сечения в строку
-for i, seg in enumerate(segments):
-    with cols[i]:
-        st.markdown(f"**Сегмент {i+1}:** Q = {seg['Q']:.4f} м³/с = {seg['Q']*1000:.2f} л/с, уклон S = {seg['S']:.5f}")
+    R, V, Q = manning_flow(A, P, S, n)
+    results.append((idx+1, A, P, R, V, Q, Q*1000))
 
-        # Поперечное сечение трубы
+    # --- Вывод графиков рядом ---
+    col_left, col_right = st.columns([1,1.2])
+
+    # Поперечное сечение
+    with col_left:
         fig, ax = plt.subplots(figsize=(3, 3))
-        if seg["shape"] == "Круглая":
-            circle = plt.Circle((0, 0), seg["D"]/2, color="lightgrey", alpha=0.5)
+        if shape == "Круглая":
+            D, _ = geom
+            circle = plt.Circle((0, 0), D/2, color="lightgray")
             ax.add_patch(circle)
-            theta = np.linspace(0, 2*np.pi, 200)
-            x = (seg["D"]/2) * np.cos(theta)
-            y = (seg["D"]/2) * np.sin(theta)
-            ax.plot(x, y, 'k')
-            ax.fill_between(x, y, -seg["D"]/2, where=(y <= seg["h"] - seg["D"]/2), color="blue", alpha=0.4)
-        else:  # Прямоугольная труба
-            ax.add_patch(plt.Rectangle((-seg["D"]/2, 0), seg["D"], seg["D"], fill=None, edgecolor='k'))
-            ax.add_patch(plt.Rectangle((-seg["D"]/2, 0), seg["D"], seg["h"], color="blue", alpha=0.4))
-        ax.set_xlim(-seg["D"], seg["D"])
-        ax.set_ylim(0, seg["D"])
+            ax.fill_between(
+                np.linspace(-D/2, D/2, 200),
+                -D/2, -D/2+h,
+                color="blue", alpha=0.5
+            )
+            ax.set_xlim(-D/2-0.05, D/2+0.05)
+            ax.set_ylim(-D/2-0.05, D/2+0.05)
+        else:
+            b, _ = geom
+            ax.add_patch(plt.Rectangle((-b/2, -h), b, h, color="blue", alpha=0.5))
+            ax.add_patch(plt.Rectangle((-b/2, -geom[1]), b, geom[1], fill=False, edgecolor="black"))
+            ax.set_xlim(-b/2-0.05, b/2+0.05)
+            ax.set_ylim(-geom[1]-0.05, 0.05)
         ax.set_aspect("equal")
         ax.axis("off")
-        st.pyplot(fig, use_container_width=True)
+        ax.set_title(f"Сегмент {idx+1}: поперечное сечение", fontsize=10)
+        st.pyplot(fig)
 
-# График Q по сегментам
-fig_seg, ax_seg = plt.subplots(figsize=(6, 3))
-ax_seg.bar(range(1, num_segments+1), q_values, color="skyblue")
-ax_seg.set_xlabel("Сегмент")
-ax_seg.set_ylabel("Q, м³/с")
-ax_seg.set_title("Расход Q по сегментам")
-st.pyplot(fig_seg, use_container_width=True)
+    # Мини-график расхода
+    with col_right:
+        fig, ax = plt.subplots(figsize=(3.5, 3))
+        ax.bar(["Q"], [Q], color="blue")
+        ax.set_ylabel("Q, м³/с")
+        ax.set_title(f"Расход сегмента {idx+1}", fontsize=10)
+        st.pyplot(fig)
 
-# График зависимости Q(h/D)
-fig_ratio, ax_ratio = plt.subplots(figsize=(6, 3))
-for i, seg in enumerate(segments):
-    h_ratios = np.linspace(0.01, seg["D"], 30)
-    Q_vals = [manning_flow(seg["shape"], seg["D"], h, seg["S"]) for h in h_ratios]
-    ax_ratio.plot(h_ratios/seg["D"], Q_vals, label=f"Сегмент {i+1}")
-ax_ratio.set_xlabel("h/D")
-ax_ratio.set_ylabel("Q, м³/с")
-ax_ratio.set_title("Зависимость Q от заполнения трубы")
-ax_ratio.legend()
-st.pyplot(fig_ratio, use_container_width=True)
+# --- Суммарные результаты ---
+df = pd.DataFrame(results, columns=["Сегмент", "A (м²)", "P (м)", "R (м)", "V (м/с)", "Q (м³/с)", "Q (л/с)"])
+total_Q = df["Q (м³/с)"].sum()
 
-# Суммарный расход
-st.subheader(f"💡 Суммарный расход: {sum(q_values):.4f} м³/с = {sum(q_values)*1000:.2f} л/с")
+st.subheader("📊 Итоговые результаты")
+st.dataframe(df.style.format({"A (м²)": "{:.6f}", "P (м)": "{:.4f}", "R (м)": "{:.4f}", "V (м/с)": "{:.3f}", "Q (м³/с)": "{:.5f}", "Q (л/с)": "{:.3f}"}))
+st.write(f"**Суммарный расход линии: {total_Q:.5f} м³/с ({total_Q*1000:.3f} л/с)**")
+
+# --- Общие графики (рядом) ---
+col1, col2 = st.columns(2)
+
+with col1:
+    fig, ax = plt.subplots(figsize=(4,3))
+    ax.plot(df["Сегмент"], df["Q (м³/с)"], marker="o")
+    ax.set_xlabel("Сегмент")
+    ax.set_ylabel("Q, м³/с")
+    ax.set_title("Расход Q по сегментам")
+    ax.grid(True)
+    st.pyplot(fig)
+
+with col2:
+    ratios = np.linspace(0.05, 1.0, 100)
+    Q_values = []
+    for ratio in ratios:
+        if shape == "Круглая":
+            D, _ = segments[0][0]
+            hh = ratio * D
+            A, P = hydraulic_params_circular(D, hh)
+        else:
+            b, _ = segments[0][0]
+            hh = ratio * h
+            A, P = hydraulic_params_rectangular(b, hh)
+        R, V, Q = manning_flow(A, P, S, n)
+        Q_values.append(Q)
+
+    fig, ax = plt.subplots(figsize=(4,3))
+    ax.plot(ratios, Q_values, color="blue")
+    ax.set_xlabel("h/D")
+    ax.set_ylabel("Q, м³/с")
+    ax.set_title("Зависимость Q от заполнения")
+    ax.grid(True)
+    st.pyplot(fig)
