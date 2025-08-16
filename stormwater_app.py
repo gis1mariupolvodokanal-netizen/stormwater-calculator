@@ -155,7 +155,6 @@ for i in range(num_segments):
                 st.session_state[f"D_{i}"] = 0.6
             D = st.number_input(f"Диаметр, м (сегмент {i+1})", value=st.session_state[f"D_{i}"], min_value=0.01, step=0.01, format="%.3f", key=f"D_{i}")
             
-            # Начальное значение h не может быть больше D
             h_initial = min(0.3, D)
             h = st.number_input(f"Высота заполнения h, м (сегмент {i+1})", value=h_initial, min_value=0.0, max_value=D, step=0.01, format="%.3f", key=f"h_{i}")
             B, H = None, None
@@ -284,6 +283,34 @@ for idx, seg in enumerate(segments, start=1):
         ax2.legend()
         
         st.pyplot(fig2)
+
+    # Таблица зависимости параметров от заполнения
+    st.subheader(f"Таблица зависимости параметров от h/D или h/H (Сегмент {idx})")
+    
+    dependence_data = []
+    # Шаг для таблицы, чтобы она не была слишком большой
+    step_ratios = np.linspace(0.1, 1.0, 10)
+    for ratio in step_ratios:
+        h_dep = ratio * max_dim
+        if seg["shape"] == "Круглая":
+            A_dep, P_dep = circ_section_area_perimeter(D, h_dep)
+        else:
+            A_dep, P_dep = rect_section_area_perimeter(B, H, h_dep)
+        
+        R_dep, V_dep, Q_dep = manning_Q(A_dep, P_dep, S, n)
+        
+        dependence_data.append({
+            "h/D или h/H": f"{ratio:.1f}",
+            "h (м)": f"{h_dep:.3f}",
+            "A (м²)": f"{A_dep:.4f}",
+            "P (м)": f"{P_dep:.4f}",
+            "R (м)": f"{R_dep:.4f}",
+            "V (м/с)": f"{V_dep:.3f}",
+            "Q (л/с)": f"{Q_dep*1000:.2f}"
+        })
+
+    df_dep = pd.DataFrame(dependence_data)
+    st.dataframe(df_dep)
 
     rows.append({
         "Сегмент": idx,
