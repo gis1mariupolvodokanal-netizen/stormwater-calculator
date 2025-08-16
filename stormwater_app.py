@@ -17,9 +17,6 @@ st.set_page_config(page_title="Калькулятор расхода ливне�
 st.title("💧 Калькулятор расхода (Маннинг) — несколько сегментов, Excel и сечения")
 
 # ----------------------- Вспомогательные функции -----------------------
-def clip01(x):
-    return max(0.0, min(1.0, x))
-
 def circ_section_area_perimeter(D, h):
     """
     Круглая труба. D — диаметр, h — высота заполнения (0..D).
@@ -33,10 +30,8 @@ def circ_section_area_perimeter(D, h):
         P_full = 2.0 * np.pi * r
         return A_full, P_full
     r = D / 2.0
-    # Аргумент для arccos клиппируем от -1 до 1 для численной устойчивости
-    arg = (r - h) / r
-    arg = np.clip(arg, -1.0, 1.0)
-    theta = 2.0 * np.arccos(arg)  # центральный угол смачиваемой части (рад)
+    arg = np.clip((r - h) / r, -1.0, 1.0)
+    theta = 2.0 * np.arccos(arg)
     A = 0.5 * r**2 * (theta - np.sin(theta))
     P = r * theta
     return A, P
@@ -66,19 +61,14 @@ def manning_Q(A, P, S, n):
 
 def draw_circular_cross_section(ax, D, h, A, P, R, theta):
     """
-    Красивое поперечное сечение круга с заливкой воды до уровня h.
-    Добавлены аннотации с параметрами и стрелки.
+    Поперечное сечение круга с заливкой воды и аннотациями.
     """
     R_circ = D / 2.0
-    
-    # Сдвигаем вниз, чтобы дно было на y=0
     y_center = R_circ
     
-    # Контур трубы
     circle = plt.Circle((0, y_center), R_circ, color="lightgray", zorder=1)
     ax.add_patch(circle)
 
-    # Заливка водой
     x = np.linspace(-R_circ, R_circ, 600)
     y_upper = np.sqrt(np.maximum(R_circ**2 - x**2, 0.0)) + y_center
     y_lower = -y_upper + 2 * y_center
@@ -88,20 +78,16 @@ def draw_circular_cross_section(ax, D, h, A, P, R, theta):
     fill_mask = y_top > y_lower
     ax.fill_between(x[fill_mask], y_lower[fill_mask], y_top[fill_mask], color="skyblue", alpha=0.8, zorder=2)
     
-    # Линия поверхности воды
     ax.plot([-np.sqrt(np.maximum(R_circ**2 - (h-y_center)**2, 0.0)), np.sqrt(np.maximum(R_circ**2 - (h-y_center)**2, 0.0))], [h, h], color='blue', linestyle='--', zorder=3)
     
-    # Аннотации
     props = dict(boxstyle='round', facecolor='white', alpha=0.7)
     textstr = f"θ = {theta:.3f} rad\nA = {A:.6f} м²\nP = {P:.5f} м\nR = {R:.5f} м"
     ax.text(-R_circ, h/2, textstr, fontsize=8, verticalalignment='center', bbox=props, zorder=4)
 
-    # Стрелка для h
     if h > 0:
         ax.annotate('', xy=(0, h), xytext=(0, 0), arrowprops=dict(facecolor='black', shrink=0.05))
         ax.text(0.01, h/2, f'h = {h:.3f} м', fontsize=8, verticalalignment='center', zorder=4)
     
-    # Стрелка для D
     ax.annotate('', xy=(R_circ, 0), xytext=(R_circ, D), arrowprops=dict(arrowstyle='<->'))
     ax.text(R_circ + 0.01, D/2, f'D = {D:.3f} м', fontsize=8, verticalalignment='center')
     
@@ -113,7 +99,6 @@ def draw_circular_cross_section(ax, D, h, A, P, R, theta):
     ax.set_ylabel("y, м (низ лотка = 0)")
     ax.grid(True, which='both', linestyle='--', linewidth=0.5)
     
-    # Убираем рамку вокруг графика
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['bottom'].set_visible(False)
@@ -123,26 +108,21 @@ def draw_circular_cross_section(ax, D, h, A, P, R, theta):
 
 def draw_rect_cross_section(ax, B, H, h):
     """
-    Красивое поперечное сечение прямоугольника с заливкой воды до h.
+    Поперечное сечение прямоугольника с заливкой воды.
     """
-    # Сдвигаем вниз, чтобы дно было на y=0
     y_bottom = 0
     
-    # Контур трубы
     ax.add_patch(plt.Rectangle((-B/2.0, y_bottom), B, H, facecolor="lightgray", edgecolor="none", zorder=1))
     
-    # Заливка водой
     h_clamped = np.clip(h, 0.0, H)
     ax.add_patch(plt.Rectangle((-B/2.0, y_bottom), B, h_clamped, facecolor="skyblue", alpha=0.8, edgecolor="none", zorder=2))
     
-    # Аннотации
     ax.annotate('', xy=(-B/2, y_bottom), xytext=(-B/2, h_clamped), arrowprops=dict(facecolor='black', shrink=0.05))
     ax.text(-B/2 + 0.01, h_clamped/2, f'h = {h_clamped:.3f} м', fontsize=8, verticalalignment='center')
     
     ax.annotate('', xy=(-B/2, y_bottom), xytext=(B/2, y_bottom), arrowprops=dict(arrowstyle='<->'))
     ax.text(0, y_bottom - 0.01, f'B = {B:.3f} м', fontsize=8, verticalalignment='top')
 
-    # Декор
     ax.set_aspect("equal", adjustable="box")
     pad_x = 0.1 * max(B, 1e-6)
     pad_y = 0.1 * max(H, 1e-6)
@@ -158,7 +138,6 @@ def draw_rect_cross_section(ax, B, H, h):
     ax.spines['left'].set_visible(False)
     ax.tick_params(axis='both', which='both', length=0)
 
-
 # ----------------------- Ввод данных -----------------------
 num_segments = st.number_input("Количество сегментов", min_value=1, max_value=20, value=2, step=1)
 
@@ -170,14 +149,28 @@ for i in range(num_segments):
     with c1:
         shape = st.selectbox(f"Форма трубы (сегмент {i+1})", ["Круглая", "Прямоугольная"], key=f"shape_{i}")
         material = st.selectbox(f"Материал трубы (сегмент {i+1})", list(materials_n.keys()), key=f"mat_{i}")
+        
         if shape == "Круглая":
-            D = st.number_input(f"Диаметр, м (сегмент {i+1})", value=0.6, min_value=0.01, step=0.01, format="%.3f", key=f"D_{i}")
-            h = st.number_input(f"Высота заполнения h, м (сегмент {i+1})", value=0.3, min_value=0.0, max_value=D, step=0.01, format="%.3f", key=f"h_{i}")
+            if f"D_{i}" not in st.session_state:
+                st.session_state[f"D_{i}"] = 0.6
+            D = st.number_input(f"Диаметр, м (сегмент {i+1})", value=st.session_state[f"D_{i}"], min_value=0.01, step=0.01, format="%.3f", key=f"D_{i}")
+            
+            # Начальное значение h не может быть больше D
+            h_initial = min(0.3, D)
+            h = st.number_input(f"Высота заполнения h, м (сегмент {i+1})", value=h_initial, min_value=0.0, max_value=D, step=0.01, format="%.3f", key=f"h_{i}")
             B, H = None, None
+            
         else:
-            B = st.number_input(f"Ширина B, м (сегмент {i+1})", value=0.6, min_value=0.01, step=0.01, format="%.3f", key=f"B_{i}")
-            H = st.number_input(f"Высота H, м (сегмент {i+1})", value=0.6, min_value=0.01, step=0.01, format="%.3f", key=f"H_{i}")
-            h = st.number_input(f"Высота заполнения h, м (сегмент {i+1})", value=0.3, min_value=0.0, max_value=H, step=0.01, format="%.3f", key=f"hrect_{i}")
+            if f"B_{i}" not in st.session_state:
+                st.session_state[f"B_{i}"] = 0.6
+            B = st.number_input(f"Ширина B, м (сегмент {i+1})", value=st.session_state[f"B_{i}"], min_value=0.01, step=0.01, format="%.3f", key=f"B_{i}")
+            
+            if f"H_{i}" not in st.session_state:
+                st.session_state[f"H_{i}"] = 0.6
+            H = st.number_input(f"Высота H, м (сегмент {i+1})", value=st.session_state[f"H_{i}"], min_value=0.01, step=0.01, format="%.3f", key=f"H_{i}")
+
+            h_initial = min(0.3, H)
+            h = st.number_input(f"Высота заполнения h, м (сегмент {i+1})", value=h_initial, min_value=0.0, max_value=H, step=0.01, format="%.3f", key=f"hrect_{i}")
 
     with c2:
         top1 = st.number_input(f"Высотная отметка верха 1-го колодца, м (сегмент {i+1})", value=246.00, step=0.01, key=f"top1_{i}")
@@ -195,13 +188,12 @@ for i in range(num_segments):
 
 # ----------------------- Расчёт по сегментам -----------------------
 rows = []
-q_lps_list = []  # для суммарного
-qh_sheet_rows = []  # для листа Q(h)
+q_lps_list = []
+qh_sheet_rows = []
 
 for idx, seg in enumerate(segments, start=1):
     n = materials_n[seg["material"]]
     
-    # Проверка на отрицательные/нулевые значения и предупреждения
     if seg["D"] is not None and seg["D"] <= 0:
         st.warning(f"Сегмент {idx}: Диаметр должен быть больше нуля.")
         continue
@@ -224,33 +216,26 @@ for idx, seg in enumerate(segments, start=1):
     theta = None
     if seg["shape"] == "Круглая":
         D = seg["D"]
-        if D is None:
-            continue
+        if D is None: continue
         A, P = circ_section_area_perimeter(D, h_input)
-        
-        # Расчет угла для аннотации
         r = D / 2.0
-        arg = (r - h_input) / r
-        arg = np.clip(arg, -1.0, 1.0)
+        arg = np.clip((r - h_input) / r, -1.0, 1.0)
         theta = 2.0 * np.arccos(arg)
     else:
         B, H = seg["B"], seg["H"]
-        if B is None or H is None:
-            continue
+        if B is None or H is None: continue
         A, P = rect_section_area_perimeter(B, H, h_input)
 
     R, V, Q = manning_Q(A, P, S, n)
     Q_lps = Q * 1000.0
     q_lps_list.append(Q_lps)
 
-    # ---------- Вывод результатов ----------
     st.markdown(f"---\n### 📊 Сегмент {idx}")
     st.write(f"Материал: **{seg['material']}**, n = `{n}`")
     st.write(f"Уклон S: `{S:.6f}` ({S*100:.3f} %)")
     st.write(f"Площадь A: `{A:.6f}` м², смоченный периметр P: `{P:.4f}` м, гидр. радиус R: `{R:.4f}` м")
     st.write(f"Скорость V: `{V:.3f}` м/с, **Расход Q: `{Q:.5f}` м³/с = `{Q_lps:.2f}` л/с**")
 
-    # ---------- Графики рядом ----------
     g1, g2 = st.columns(2)
 
     with g1:
@@ -263,7 +248,6 @@ for idx, seg in enumerate(segments, start=1):
         st.pyplot(fig)
 
     with g2:
-        # Кривая Q(h) для данного сегмента
         if seg["shape"] == "Круглая":
             max_dim = D
         else:
@@ -278,9 +262,8 @@ for idx, seg in enumerate(segments, start=1):
             else:
                 Ai, Pi = rect_section_area_perimeter(B, H, hh)
             _, _, Qi = manning_Q(Ai, Pi, S, n)
-            Qs.append(Qi * 1000.0) # в л/с
+            Qs.append(Qi * 1000.0)
             
-            # Соберём в Excel-лист Q(h)
             qh_sheet_rows.append({
                 "Сегмент": idx,
                 "ratio": ratio,
@@ -295,15 +278,13 @@ for idx, seg in enumerate(segments, start=1):
         ax2.set_title(f"Q(h) для сегмента {idx}", fontsize=10)
         ax2.grid(True, linestyle='--', alpha=0.6)
         
-        # Добавляем точку для текущего h
-        current_ratio = h_input / max_dim
+        current_ratio = h_input / max_dim if max_dim > 0 else 0
         current_Q = Q_lps
         ax2.plot(current_ratio, current_Q, 'ro', label=f'Текущее Q = {current_Q:.2f} л/с')
         ax2.legend()
         
         st.pyplot(fig2)
 
-    # строка в основную таблицу
     rows.append({
         "Сегмент": idx,
         "Форма": seg["shape"],
@@ -334,7 +315,6 @@ if rows:
     cA, cB = st.columns(2)
 
     with cA:
-        # Столбчатый график Q по сегментам
         figb, axb = plt.subplots(figsize=(4.2, 3.0))
         axb.bar(df["Сегмент"].astype(str), df["Q (л/с)"])
         axb.set_xlabel("Сегмент")
@@ -346,14 +326,11 @@ if rows:
     with cB:
         st.info("Кривые Q(h) для каждого сегмента сохранены в Excel (лист «Q(h)»).")
 
-    # ----------------------- Выгрузка в Excel -----------------------
-    qh_df = pd.DataFrame(qh_sheet_rows) if qh_sheet_rows else pd.DataFrame(
-        columns=["Сегмент", "ratio", "h (м)", "Q (м³/с)"]
-    )
     output = io.BytesIO()
     try:
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Сегменты")
+            qh_df = pd.DataFrame(qh_sheet_rows)
             qh_df.to_excel(writer, index=False, sheet_name="Q(h)")
         xlsx_bytes = output.getvalue()
         st.download_button(
